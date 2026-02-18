@@ -392,3 +392,39 @@ footer a:hover { color: var(--text); }
   .steps { grid-template-columns: 1fr; }
   .hero h1 { font-size: 2rem; }
 }
+
+/* ── Agent Avatar ─────────────────────────────── */
+.agent-avatar {
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  object-fit: cover;
+  margin: 0 auto 1.5rem;
+  display: block;
+  border: 2px solid var(--accent, var(--grace));
+  box-shadow:
+    0 0 20px var(--accent, var(--grace)),
+    0 0 60px color-mix(in srgb, var(--accent, var(--grace)) 30%, transparent),
+    inset 0 0 20px rgba(0,0,0,0.4);
+  filter: drop-shadow(0 0 20px var(--accent, var(--grace)));
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+.agent-avatar:hover {
+  transform: scale(1.04);
+  box-shadow:
+    0 0 35px var(--accent, var(--grace)),
+    0 0 80px color-mix(in srgb, var(--accent, var(--grace)) 40%, transparent),
+    inset 0 0 20px rgba(0,0,0,0.4);
+}
+
+/* Card avatars on index page */
+.card-avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  object-fit: cover;
+  margin: 0 auto 0.75rem;
+  display: block;
+  border: 2px solid var(--accent, var(--grace));
+  box-shadow: 0 0 12px var(--accent, var(--grace));
+}
