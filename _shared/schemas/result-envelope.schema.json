@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentResultEnvelope",
+  "type": "object",
+  "required": [
+    "task_id",
+    "completed_at_utc",
+    "from_agent",
+    "to_agent",
+    "status",
+    "summary",
+    "recommendation",
+    "next_steps"
+  ],
+  "properties": {
+    "task_id": { "type": "string" },
+    "completed_at_utc": { "type": "string" },
+    "from_agent": { "type": "string" },
+    "to_agent": { "type": "string" },
+    "status": { "type": "string", "enum": ["completed", "blocked", "needs_clarification"] },
+    "summary": { "type": "string" },
+    "facts": { "type": "array", "items": { "type": "string" } },
+    "assumptions": { "type": "array", "items": { "type": "string" } },
+    "recommendation": { "type": "string" },
+    "next_steps": { "type": "array", "items": { "type": "string" } },
+    "approval_needed": { "type": "string" },
+    "attachments": { "type": "array", "items": { "type": "string" } },
+    "metadata": { "type": "object" }
+  }
+}
