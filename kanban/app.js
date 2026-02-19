@@ -32,6 +32,7 @@ class GraceKanban {
       AGENTS.forEach(agent => {
         const agentTasks = this.tasks.filter(t => t.agentId === agent.id);
         this.scene.updateAgentTasks(agent.id, agentTasks);
+        this.scene.updateLabelTaskCounts(agent.id, agentTasks.length);
       });
     }
 
@@ -95,6 +96,7 @@ class GraceKanban {
       AGENTS.forEach(agent => {
         const agentTasks = this.tasks.filter(t => t.agentId === agent.id);
         this.scene.updateAgentTasks(agent.id, agentTasks);
+        this.scene.updateLabelTaskCounts(agent.id, agentTasks.length);
       });
     }
 

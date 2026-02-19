@@ -93,10 +93,13 @@ class KanbanScene {
 
     const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
 
+    this.orbitState.lastInteraction = 0;
+
     const onDown = (x, y) => {
       this.orbitState.isDown = true;
       this.orbitState.startX = x;
       this.orbitState.startY = y;
+      this.orbitState.lastInteraction = Date.now();
     };
     const onMove = (x, y) => {
       if (!this.orbitState.isDown) return;
@@ -106,8 +109,12 @@ class KanbanScene {
       this.orbitState.startY = y;
       this.orbitState.targetTheta -= dx;
       this.orbitState.targetPhi = clamp(this.orbitState.targetPhi - dy, 0.05, 1.2);
+      this.orbitState.lastInteraction = Date.now();
     };
-    const onUp = () => { this.orbitState.isDown = false; };
+    const onUp = () => {
+      this.orbitState.isDown = false;
+      this.orbitState.lastInteraction = Date.now();
+    };
     const onWheel = (e) => {
       this.orbitState.targetRadius = clamp(this.orbitState.targetRadius + e.deltaY * 0.03, 8, 60);
     };
@@ -124,6 +131,13 @@ class KanbanScene {
   _updateOrbitCamera() {
     const o = this.orbitState;
     const lerp = (a, b, t) => a + (b - a) * t;
+
+    // Auto-rotate when idle for 5+ seconds and not zoomed in on agent
+    const idleMs = Date.now() - (o.lastInteraction || 0);
+    if (idleMs > 5000 && !this.selectedAgent && !o.isDown) {
+      o.targetTheta += 0.003;
+    }
+
     o.theta = lerp(o.theta, o.targetTheta, 0.08);
     o.phi = lerp(o.phi, o.targetPhi, 0.08);
     o.radius = lerp(o.radius, o.targetRadius, 0.08);
@@ -366,8 +380,11 @@ class KanbanScene {
   // ---- Agent Panels ----
 
   buildAgentPanels(agents) {
-    // Remove existing panels
-    this.agentPanels.forEach(p => this.scene.remove(p.group));
+    // Remove existing panels and connection lines
+    this.agentPanels.forEach(p => {
+      this.scene.remove(p.group);
+      if (p.connectionLine) this.scene.remove(p.connectionLine);
+    });
     this.agentPanels = [];
     this.interactiveObjects = [];
 
@@ -531,13 +548,29 @@ class KanbanScene {
       statusDot.position.set(0.4, panelH / 2 + 0.6, 0.4);
       group.add(statusDot);
 
+      // --- Connection line to center ---
+      const lineMat = new THREE.LineBasicMaterial({
+        color: agentColor,
+        transparent: true,
+        opacity: 0.12
+      });
+      // Note: line is in world space so we add to scene, not group
+      const linePts = [
+        new THREE.Vector3(x * 0.1, -1.5, z * 0.1),
+        new THREE.Vector3(x * 0.95, -0.5, z * 0.95)
+      ];
+      const lineGeo = new THREE.BufferGeometry().setFromPoints(linePts);
+      const connectionLine = new THREE.Line(lineGeo, lineMat);
+      this.scene.add(connectionLine);
+
       this.scene.add(group);
 
       this.agentPanels.push({
         group, panel, panelMat, avatar, ring, statusDot, pLight,
         agent, angle, x, z,
         baseY: 0,
-        taskCards: []
+        taskCards: [],
+        connectionLine
       });
     });
   }
@@ -718,6 +751,7 @@ class KanbanScene {
 
     agents.forEach((agent, i) => {
       const wrap = document.createElement('div');
+      wrap.dataset.agentId = agent.id;
       wrap.style.cssText = `
         position: absolute;
         display: flex;
@@ -726,6 +760,7 @@ class KanbanScene {
         pointer-events: none;
         transform: translate(-50%, -50%);
         transition: opacity 0.3s;
+        gap: 2px;
       `;
 
       const nameEl = document.createElement('div');
@@ -737,22 +772,34 @@ class KanbanScene {
         color: ${agent.color};
         text-shadow: 0 0 8px ${agent.color}, 0 0 20px ${agent.color}40;
         white-space: nowrap;
-        background: rgba(0,0,0,0.6);
-        padding: 2px 8px;
-        border: 1px solid ${agent.color}50;
+        background: rgba(0,0,0,0.65);
+        padding: 3px 8px;
+        border: 1px solid ${agent.color}60;
         border-radius: 2px;
         backdrop-filter: blur(4px);
+        display: flex;
+        align-items: center;
+        gap: 5px;
       `;
-      nameEl.textContent = `${agent.emoji} ${agent.name.toUpperCase()}`;
+      nameEl.innerHTML = `${agent.emoji} ${agent.name.toUpperCase()} <span class="label-task-count" style="
+        font-size: 8px;
+        background: ${agent.color}25;
+        border: 1px solid ${agent.color}80;
+        border-radius: 2px;
+        padding: 0 4px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        min-width: 18px;
+        text-align: center;
+      ">0</span>`;
 
       const roleEl = document.createElement('div');
       roleEl.style.cssText = `
         font-family: 'Share Tech Mono', monospace;
         font-size: 7px;
-        color: rgba(200,200,255,0.55);
-        letter-spacing: 0.12em;
+        color: rgba(200,200,255,0.5);
+        letter-spacing: 0.1em;
         white-space: nowrap;
-        margin-top: 2px;
       `;
       roleEl.textContent = agent.role.toUpperCase();
 
@@ -761,6 +808,18 @@ class KanbanScene {
       container.appendChild(wrap);
       this.labelEls.push(wrap);
     });
+  }
+
+  updateLabelTaskCounts(agentId, count) {
+    if (!this.labelEls) return;
+    const pd = this.agentPanels.find(p => p.agent.id === agentId);
+    if (!pd) return;
+    const idx = this.agentPanels.indexOf(pd);
+    const el = this.labelEls[idx];
+    if (el) {
+      const countEl = el.querySelector('.label-task-count');
+      if (countEl) countEl.textContent = count;
+    }
   }
 
   _updateLabels() {
@@ -808,6 +867,13 @@ class KanbanScene {
     if (this.gridGroup) {
       this.gridGroup.position.z = (elapsed * 1.5) % 2;
     }
+
+    // Animate connection lines
+    this.agentPanels.forEach((pd, i) => {
+      if (pd.connectionLine) {
+        pd.connectionLine.material.opacity = 0.08 + 0.08 * Math.sin(elapsed * 1.5 + i * 0.7);
+      }
+    });
 
     // Animate agent panels
     this.agentPanels.forEach((pd, i) => {
