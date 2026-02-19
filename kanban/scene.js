@@ -52,6 +52,7 @@ class KanbanScene {
 
     // --- Environment ---
     this._buildSynthwaveGrid();
+    this._buildCenterPlatform();
     this._buildParticleSystem();
     this._buildStarfield();
     this._buildSunHorizon();
@@ -61,6 +62,17 @@ class KanbanScene {
     this.canvas.addEventListener('mousemove', (e) => this._onMouseMove(e));
     this.canvas.addEventListener('click', (e) => this._onClick(e));
     this.canvas.addEventListener('touchstart', (e) => this._onTouch(e), { passive: true });
+
+    // Start cinematic intro animation
+    this.orbitState.radius = 70;
+    this.orbitState.phi = 0.08;
+    this.orbitState.theta = Math.PI * 0.6;
+    // Delay then sweep to default
+    setTimeout(() => {
+      this.orbitState.targetRadius = 28;
+      this.orbitState.targetPhi = 0.3;
+      this.orbitState.targetTheta = 0;
+    }, 300);
 
     this._animate();
   }
@@ -223,6 +235,45 @@ class KanbanScene {
     sunGroup.add(glow);
 
     this.scene.add(sunGroup);
+  }
+
+  _buildCenterPlatform() {
+    // Glowing circle at center
+    const ringGeo = new THREE.RingGeometry(12.5, 13, 64);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0x00fff0, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = -2.99;
+    this.scene.add(ring);
+
+    // Inner ring
+    const ring2Geo = new THREE.RingGeometry(1.5, 1.8, 32);
+    const ring2Mat = new THREE.MeshBasicMaterial({ color: 0xff00aa, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
+    const ring2 = new THREE.Mesh(ring2Geo, ring2Mat);
+    ring2.rotation.x = -Math.PI / 2;
+    ring2.position.y = -2.99;
+    this.centerInnerRing = ring2;
+    this.scene.add(ring2);
+
+    // Pulse ring system
+    this.pulseRings = [];
+    for (let i = 0; i < 3; i++) {
+      const pGeo = new THREE.RingGeometry(1, 1.05, 32);
+      const pMat = new THREE.MeshBasicMaterial({ color: 0x00fff0, transparent: true, opacity: 0.0, side: THREE.DoubleSide });
+      const pRing = new THREE.Mesh(pGeo, pMat);
+      pRing.rotation.x = -Math.PI / 2;
+      pRing.position.y = -2.98;
+      pRing.userData.phase = i / 3; // stagger phases
+      this.pulseRings.push(pRing);
+      this.scene.add(pRing);
+    }
+
+    // Vertical beam at center
+    const beamGeo = new THREE.CylinderGeometry(0.05, 0.3, 6, 8);
+    const beamMat = new THREE.MeshBasicMaterial({ color: 0x00fff0, transparent: true, opacity: 0.15 });
+    const beam = new THREE.Mesh(beamGeo, beamMat);
+    beam.position.y = 0;
+    this.scene.add(beam);
   }
 
   _buildParticleSystem() {
@@ -491,12 +542,62 @@ class KanbanScene {
     });
   }
 
+  _makeTaskCardTexture(task, agentColor, pixW = 128, pixH = 64) {
+    const canvas = document.createElement('canvas');
+    canvas.width = pixW;
+    canvas.height = pixH;
+    const ctx = canvas.getContext('2d');
+
+    // Background
+    ctx.fillStyle = 'rgba(5, 5, 20, 0.9)';
+    ctx.fillRect(0, 0, pixW, pixH);
+
+    // Border
+    ctx.strokeStyle = agentColor + '55';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(0.75, 0.75, pixW - 1.5, pixH - 1.5);
+
+    // Priority stripe color
+    const priColors = { critical: '#ff0055', high: '#f472b6', medium: '#f7c948', low: '#4ade80' };
+    const priColor = priColors[task.priority] || '#808080';
+    ctx.fillStyle = priColor;
+    ctx.fillRect(0, 0, 3, pixH);
+
+    // Task title (truncate)
+    ctx.fillStyle = '#e0e0ff';
+    ctx.font = 'bold 11px monospace';
+    const maxW = pixW - 16;
+    let title = task.title;
+    while (ctx.measureText(title).width > maxW && title.length > 3) {
+      title = title.slice(0, -1);
+    }
+    if (title !== task.title) title += '…';
+    ctx.fillText(title, 8, 22);
+
+    // Priority badge
+    ctx.fillStyle = priColor;
+    ctx.font = '8px monospace';
+    ctx.fillText(task.priority.toUpperCase(), 8, pixH - 10);
+
+    // Scanline effect
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+    for (let y = 0; y < pixH; y += 4) {
+      ctx.fillRect(0, y, pixW, 2);
+    }
+
+    return new THREE.CanvasTexture(canvas);
+  }
+
   updateAgentTasks(agentId, tasks) {
     const panelData = this.agentPanels.find(p => p.agent.id === agentId);
     if (!panelData) return;
 
-    // Remove old cards
-    panelData.taskCards.forEach(c => panelData.group.remove(c));
+    // Dispose old card textures & remove
+    panelData.taskCards.forEach(c => {
+      if (c.material && c.material.map) c.material.map.dispose();
+      if (c.material) c.material.dispose();
+      panelData.group.remove(c);
+    });
     panelData.taskCards = [];
 
     const panelW = 4.5;
@@ -505,37 +606,27 @@ class KanbanScene {
     const hh = panelH / 2;
     const colWidth = panelW / 4;
     const cols = ['backlog', 'inprogress', 'review', 'done'];
-    const priorityColors = { critical: 0xff0055, high: 0xf472b6, medium: 0xf7c948, low: 0x4ade80 };
 
     cols.forEach((col, ci) => {
       const colTasks = tasks.filter(t => t.column === col).slice(0, 4);
       const colX = -hw + colWidth * (ci + 0.5);
 
       colTasks.forEach((task, ti) => {
-        const cardW = colWidth - 0.15;
-        const cardH = 0.55;
-        const cardY = hh * 0.75 - 0.1 - ti * (cardH + 0.08);
+        const cardW = colWidth - 0.12;
+        const cardH = 0.52;
+        const cardY = hh * 0.78 - 0.1 - ti * (cardH + 0.1);
 
+        // Use canvas texture for rich card display
+        const tex = this._makeTaskCardTexture(task, panelData.agent.color);
         const cardGeo = new THREE.PlaneGeometry(cardW, cardH);
-        const pColor = new THREE.Color(priorityColors[task.priority] || 0x808080);
-        const agentColor = new THREE.Color(panelData.agent.color);
-
         const cardMat = new THREE.MeshBasicMaterial({
-          color: agentColor.clone().lerp(new THREE.Color(0x000033), 0.7),
+          map: tex,
           transparent: true,
-          opacity: 0.85,
-          side: THREE.DoubleSide
+          side: THREE.DoubleSide,
+          depthWrite: false
         });
         const card = new THREE.Mesh(cardGeo, cardMat);
-        card.position.set(colX, cardY, 0.05);
-
-        // Priority stripe on left
-        const stripeGeo = new THREE.PlaneGeometry(0.04, cardH);
-        const stripeMat = new THREE.MeshBasicMaterial({ color: pColor, side: THREE.DoubleSide });
-        const stripe = new THREE.Mesh(stripeGeo, stripeMat);
-        stripe.position.set(-cardW / 2 + 0.025, 0, 0.001);
-        card.add(stripe);
-
+        card.position.set(colX, cardY, 0.06);
         card.userData = { type: 'taskCard', taskId: task.id, agentId };
         panelData.group.add(card);
         panelData.taskCards.push(card);
@@ -756,6 +847,23 @@ class KanbanScene {
     // Check if any panel hovered for cursor
     const anyHovered = this.agentPanels.some(pd => pd.panelMat.uniforms.hovered.value > 0);
     if (!anyHovered) document.body.style.cursor = 'default';
+
+    // Animate pulse rings
+    if (this.pulseRings) {
+      this.pulseRings.forEach(ring => {
+        const phase = ring.userData.phase;
+        const t = ((elapsed * 0.5 + phase) % 1.0);
+        const maxR = 14;
+        const r = t * maxR;
+        ring.scale.set(r, r, r);
+        ring.material.opacity = (1 - t) * 0.25;
+      });
+    }
+
+    // Rotate center inner ring
+    if (this.centerInnerRing) {
+      this.centerInnerRing.rotation.z = elapsed * 0.8;
+    }
 
     // Update HTML labels
     this._updateLabels();
