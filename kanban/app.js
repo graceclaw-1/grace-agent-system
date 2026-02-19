@@ -40,6 +40,9 @@ class GraceKanban {
     this.ui.updateHUD(getTaskStats(this.tasks));
     this.ui.updateAgentCount(AGENTS.length);
 
+    // Keyboard shortcuts
+    this._setupKeyboardShortcuts();
+
     // Start scanline animation
     this._animateScanline();
 
@@ -161,6 +164,28 @@ class GraceKanban {
 
     if (this.scene) this.scene.zoomToAgent(agentId);
     this.ui.showAgentSidebar(agent, this.tasks);
+  }
+
+  // ---- Keyboard Shortcuts ----
+  _setupKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+      // Ignore when in input fields
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+      if (e.key === 'n' || e.key === 'N') {
+        this.ui.openModal();
+      } else if (e.key === 'Escape') {
+        if (this.selectedAgentId) {
+          this.ui.hideAgentSidebar();
+          this.resetView();
+        }
+      } else if (e.key === 'r' || e.key === 'R') {
+        this.resetView();
+      } else if (e.key === '2') {
+        this.setView('2d');
+      } else if (e.key === '3') {
+        this.setView('3d');
+      }
+    });
   }
 
   // ---- Scanline CRT effect ----
