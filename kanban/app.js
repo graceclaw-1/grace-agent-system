@@ -25,6 +25,7 @@ class GraceKanban {
     if (canvas) {
       this.scene = new KanbanScene(canvas);
       this.scene.buildAgentPanels(AGENTS);
+      this.scene.buildAgentLabels(AGENTS);
       this.scene.onAgentClick = (agentId) => this.onAgentClick(agentId);
 
       // Populate initial task cards in 3D

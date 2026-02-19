@@ -27,7 +27,9 @@ class KanbanScene {
       alpha: true
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setSize(this.canvas.clientWidth, this.canvas.clientHeight);
+    const w = this.canvas.parentElement ? this.canvas.parentElement.clientWidth : window.innerWidth;
+    const h = this.canvas.parentElement ? this.canvas.parentElement.clientHeight : window.innerHeight;
+    this.renderer.setSize(w, h);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.2;
 
@@ -424,11 +426,20 @@ class KanbanScene {
       });
 
       // --- Divider lines for 4 columns ---
-      const divMat = new THREE.LineBasicMaterial({ color: agentColor, transparent: true, opacity: 0.3 });
-      for (let d = 1; d < 4; d++) {
-        const dx = -hw + (panelW / 4) * d;
-        const divPts = [new THREE.Vector3(dx, -hh + 1.0, 0.01), new THREE.Vector3(dx, hh * 0.8, 0.01)];
-        group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(divPts), divMat));
+      const divMat = new THREE.LineBasicMaterial({ color: agentColor, transparent: true, opacity: 0.35 });
+      const colLabels = ['B', 'IP', 'R', 'D'];
+      for (let d = 0; d < 4; d++) {
+        if (d > 0) {
+          const dx = -hw + (panelW / 4) * d;
+          const divPts = [new THREE.Vector3(dx, -hh + 0.8, 0.01), new THREE.Vector3(dx, hh * 0.82, 0.01)];
+          group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(divPts), divMat));
+        }
+        // Column top indicator dot
+        const dotGeo = new THREE.CircleGeometry(0.07, 6);
+        const dotMat = new THREE.MeshBasicMaterial({ color: agentColor, transparent: true, opacity: 0.6 });
+        const dot = new THREE.Mesh(dotGeo, dotMat);
+        dot.position.set(-hw + (panelW / 4) * (d + 0.5), hh * 0.82, 0.02);
+        group.add(dot);
       }
 
       // --- Point light at panel ---
@@ -600,11 +611,94 @@ class KanbanScene {
   }
 
   _onResize() {
-    const w = this.canvas.clientWidth;
-    const h = this.canvas.clientHeight;
+    const parent = this.canvas.parentElement;
+    const w = parent ? parent.clientWidth : window.innerWidth;
+    const h = parent ? parent.clientHeight : window.innerHeight;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+  }
+
+  buildAgentLabels(agents) {
+    const container = document.getElementById('agent-labels');
+    if (!container) return;
+    container.innerHTML = '';
+    this.labelEls = [];
+
+    agents.forEach((agent, i) => {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = `
+        position: absolute;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+        transition: opacity 0.3s;
+      `;
+
+      const nameEl = document.createElement('div');
+      nameEl.style.cssText = `
+        font-family: 'Orbitron', monospace;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        color: ${agent.color};
+        text-shadow: 0 0 8px ${agent.color}, 0 0 20px ${agent.color}40;
+        white-space: nowrap;
+        background: rgba(0,0,0,0.6);
+        padding: 2px 8px;
+        border: 1px solid ${agent.color}50;
+        border-radius: 2px;
+        backdrop-filter: blur(4px);
+      `;
+      nameEl.textContent = `${agent.emoji} ${agent.name.toUpperCase()}`;
+
+      const roleEl = document.createElement('div');
+      roleEl.style.cssText = `
+        font-family: 'Share Tech Mono', monospace;
+        font-size: 7px;
+        color: rgba(200,200,255,0.55);
+        letter-spacing: 0.12em;
+        white-space: nowrap;
+        margin-top: 2px;
+      `;
+      roleEl.textContent = agent.role.toUpperCase();
+
+      wrap.appendChild(nameEl);
+      wrap.appendChild(roleEl);
+      container.appendChild(wrap);
+      this.labelEls.push(wrap);
+    });
+  }
+
+  _updateLabels() {
+    if (!this.labelEls || !this.agentPanels.length) return;
+    const canvas = this.canvas;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+
+    this.agentPanels.forEach((pd, i) => {
+      const el = this.labelEls[i];
+      if (!el) return;
+
+      // Project avatar position to screen
+      const pos = new THREE.Vector3();
+      pd.avatar.getWorldPosition(pos);
+      pos.project(this.camera);
+
+      const x = ((pos.x + 1) / 2) * w;
+      const y = ((-pos.y + 1) / 2) * h;
+
+      // Only show if in front of camera
+      if (pos.z < 1) {
+        el.style.left = x + 'px';
+        el.style.top = (y - 32) + 'px';
+        el.style.opacity = '1';
+      } else {
+        el.style.opacity = '0';
+      }
+    });
   }
 
   _animate() {
@@ -662,6 +756,9 @@ class KanbanScene {
     // Check if any panel hovered for cursor
     const anyHovered = this.agentPanels.some(pd => pd.panelMat.uniforms.hovered.value > 0);
     if (!anyHovered) document.body.style.cursor = 'default';
+
+    // Update HTML labels
+    this._updateLabels();
 
     this.renderer.render(this.scene, this.camera);
   }

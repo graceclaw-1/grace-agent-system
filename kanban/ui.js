@@ -363,7 +363,10 @@ class KanbanUI {
 
     // Bind close
     document.getElementById('sidebar-close') && 
-      document.getElementById('sidebar-close').addEventListener('click', () => this.hideAgentSidebar());
+      document.getElementById('sidebar-close').addEventListener('click', () => {
+        this.hideAgentSidebar();
+        this.app.resetView();
+      });
 
     // Bind add
     sidebar.querySelector('.sidebar-add-btn') &&
@@ -386,7 +389,6 @@ class KanbanUI {
   hideAgentSidebar() {
     const sidebar = document.getElementById('agent-sidebar');
     if (sidebar) sidebar.classList.remove('active');
-    this.app.resetView();
   }
 
   showToast(message, type = 'info') {
