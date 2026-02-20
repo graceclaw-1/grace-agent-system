@@ -199,81 +199,43 @@ class KanbanScene {
   }
 
   _buildSunHorizon() {
-    // Soft aurora / nebula glow on the horizon — replaces the harsh striped sun
-    const auroraGroup = new THREE.Group();
-    auroraGroup.position.set(0, 0, -48);
+    // Soft glow sprites on the horizon — Sprites always face the camera so
+    // they never appear as visible flat rectangles
+    this.auroraSprites = [];
+    this.auroraUniforms = [];
 
-    // Large soft glow plane — deep purple-cyan aurora
-    const auroraGeo = new THREE.PlaneGeometry(80, 24);
-    const auroraMat = new THREE.ShaderMaterial({
-      uniforms: { time: { value: 0 } },
-      vertexShader: `
-        varying vec2 vUv;
-        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
-      `,
-      fragmentShader: `
-        varying vec2 vUv;
-        uniform float time;
-        void main() {
-          // Fade out at edges and top
-          float xFade = 1.0 - pow(abs(vUv.x - 0.5) * 2.0, 2.0);
-          float yFade = smoothstep(1.0, 0.0, vUv.y) * smoothstep(0.0, 0.15, vUv.y);
+    const glowDefs = [
+      { pos: [0, 4, -48],  size: 60, colors: ['#00fff0', '#7700ff'], alpha: 0.18 },
+      { pos: [-20, 2, -44], size: 35, colors: ['#ff00aa', '#7700ff'], alpha: 0.12 },
+      { pos: [20, 2, -44],  size: 35, colors: ['#00fff0', '#ff00aa'], alpha: 0.12 },
+    ];
 
-          // Slow aurora wave
-          float wave = sin(vUv.x * 6.0 + time * 0.3) * 0.5 + 0.5;
-          float wave2 = sin(vUv.x * 3.0 - time * 0.2 + 1.5) * 0.5 + 0.5;
+    glowDefs.forEach(def => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256; canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+      // Radial gradient — soft blob, no hard edges, no visible rectangle
+      const grad = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+      grad.addColorStop(0,   def.colors[0] + 'AA');
+      grad.addColorStop(0.4, def.colors[1] + '55');
+      grad.addColorStop(1,   'transparent');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 256, 256);
 
-          // Color: cyan to purple aurora
-          vec3 col1 = vec3(0.0, 1.0, 0.94);   // cyan
-          vec3 col2 = vec3(0.5, 0.1, 1.0);     // purple
-          vec3 col3 = vec3(1.0, 0.0, 0.67);    // hot pink
-
-          vec3 color = mix(col1, col2, wave);
-          color = mix(color, col3, wave2 * 0.3);
-
-          float alpha = xFade * yFade * 0.18;
-          gl_FragColor = vec4(color, alpha);
-        }
-      `,
-      transparent: true,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false
+      const tex = new THREE.CanvasTexture(canvas);
+      const mat = new THREE.SpriteMaterial({
+        map: tex,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        opacity: def.alpha
+      });
+      const sprite = new THREE.Sprite(mat);
+      sprite.position.set(...def.pos);
+      sprite.scale.set(def.size, def.size, 1);
+      this.scene.add(sprite);
+      this.auroraSprites.push({ sprite, mat, baseOpacity: def.alpha });
     });
-    const aurora = new THREE.Mesh(auroraGeo, auroraMat);
-    aurora.position.y = 6;
-    auroraGroup.add(aurora);
-
-    // Second softer layer
-    const aurora2Geo = new THREE.PlaneGeometry(60, 12);
-    const aurora2Mat = new THREE.ShaderMaterial({
-      uniforms: { time: { value: 0 } },
-      vertexShader: `
-        varying vec2 vUv;
-        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
-      `,
-      fragmentShader: `
-        varying vec2 vUv;
-        uniform float time;
-        void main() {
-          float xFade = 1.0 - pow(abs(vUv.x - 0.5) * 2.0, 1.5);
-          float yFade = smoothstep(1.0, 0.2, vUv.y) * smoothstep(0.0, 0.3, vUv.y);
-          float wave = sin(vUv.x * 4.0 - time * 0.15 + 0.8) * 0.5 + 0.5;
-          vec3 color = mix(vec3(0.0, 0.8, 1.0), vec3(0.6, 0.0, 1.0), wave);
-          gl_FragColor = vec4(color, xFade * yFade * 0.12);
-        }
-      `,
-      transparent: true,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false
-    });
-    const aurora2 = new THREE.Mesh(aurora2Geo, aurora2Mat);
-    aurora2.position.y = 3;
-    auroraGroup.add(aurora2);
-
-    this.auroraUniforms = [auroraMat.uniforms, aurora2Mat.uniforms];
-    this.scene.add(auroraGroup);
   }
 
   _buildCenterPlatform() {
@@ -285,14 +247,23 @@ class KanbanScene {
     ring.position.y = -2.99;
     this.scene.add(ring);
 
-    // Inner ring
-    const ring2Geo = new THREE.RingGeometry(1.5, 1.8, 32);
-    const ring2Mat = new THREE.MeshBasicMaterial({ color: 0xff00aa, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
-    const ring2 = new THREE.Mesh(ring2Geo, ring2Mat);
-    ring2.rotation.x = -Math.PI / 2;
-    ring2.position.y = -2.99;
-    this.centerInnerRing = ring2;
-    this.scene.add(ring2);
+    // Inner ring — use a small sprite glow instead of RingGeometry (avoids rectangle artifact)
+    const innerCanvas = document.createElement('canvas');
+    innerCanvas.width = 64; innerCanvas.height = 64;
+    const ictx = innerCanvas.getContext('2d');
+    const ig = ictx.createRadialGradient(32, 32, 2, 32, 32, 32);
+    ig.addColorStop(0, 'rgba(255,0,170,0.9)');
+    ig.addColorStop(0.4, 'rgba(255,0,170,0.3)');
+    ig.addColorStop(1, 'transparent');
+    ictx.fillStyle = ig;
+    ictx.fillRect(0, 0, 64, 64);
+    const innerTex = new THREE.CanvasTexture(innerCanvas);
+    const innerMat = new THREE.SpriteMaterial({ map: innerTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.7 });
+    const innerSprite = new THREE.Sprite(innerMat);
+    innerSprite.position.set(0, -2.5, 0);
+    innerSprite.scale.set(4, 4, 1);
+    this.centerInnerRing = innerSprite;
+    this.scene.add(innerSprite);
 
     // Pulse ring system
     this.pulseRings = [];
@@ -883,9 +854,11 @@ class KanbanScene {
       this.particles.material.uniforms.time.value = elapsed;
     }
 
-    // Animate aurora
-    if (this.auroraUniforms) {
-      this.auroraUniforms.forEach(u => { u.time.value = elapsed; });
+    // Gently pulse aurora sprites
+    if (this.auroraSprites) {
+      this.auroraSprites.forEach((s, i) => {
+        s.mat.opacity = s.baseOpacity * (0.8 + 0.2 * Math.sin(elapsed * 0.4 + i * 1.3));
+      });
     }
 
     // Animate grid scroll
@@ -951,9 +924,9 @@ class KanbanScene {
       });
     }
 
-    // Rotate center inner ring
-    if (this.centerInnerRing) {
-      this.centerInnerRing.rotation.z = elapsed * 0.8;
+    // Pulse center inner glow sprite
+    if (this.centerInnerRing && this.centerInnerRing.material) {
+      this.centerInnerRing.material.opacity = 0.5 + 0.3 * Math.sin(elapsed * 1.5);
     }
 
     // Update HTML labels
