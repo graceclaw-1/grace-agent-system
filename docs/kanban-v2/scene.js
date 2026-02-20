@@ -192,18 +192,7 @@ class KanbanScene {
       gridGroup.add(new THREE.Line(geo, vMat));
     }
 
-    // Floor plane — very dark, nearly invisible
-    const floorGeo = new THREE.PlaneGeometry(120, 80);
-    const floorMat = new THREE.MeshBasicMaterial({
-      color: 0x000008,
-      transparent: true,
-      opacity: 0.85,
-      side: THREE.DoubleSide
-    });
-    const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -3.01;
-    gridGroup.add(floor);
+    // No floor plane — grid lines only (plane caused a visible rectangle artifact)
 
     this.gridGroup = gridGroup;
     this.scene.add(gridGroup);
@@ -318,12 +307,7 @@ class KanbanScene {
       this.scene.add(pRing);
     }
 
-    // Vertical beam at center
-    const beamGeo = new THREE.CylinderGeometry(0.05, 0.3, 6, 8);
-    const beamMat = new THREE.MeshBasicMaterial({ color: 0x00fff0, transparent: true, opacity: 0.15 });
-    const beam = new THREE.Mesh(beamGeo, beamMat);
-    beam.position.y = 0;
-    this.scene.add(beam);
+    // Vertical beam removed — caused a rectangular artifact on mobile
   }
 
   _buildParticleSystem() {

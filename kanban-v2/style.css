@@ -78,6 +78,19 @@ html, body {
   text-shadow: var(--glow-pink);
 }
 
+.boot-tagline {
+  font-family: var(--font-mono);
+  font-size: clamp(10px, 2vw, 13px);
+  color: var(--hot-pink);
+  letter-spacing: 0.12em;
+  text-align: center;
+  opacity: 0.85;
+  text-shadow: 0 0 12px rgba(255, 0, 170, 0.6);
+  max-width: 420px;
+  padding: 0 20px;
+  margin-top: -8px;
+}
+
 .boot-bar-wrap {
   width: 320px;
   height: 4px;
