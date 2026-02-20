@@ -7,7 +7,7 @@ class App {
     this.taskManager = new TaskManager();
     this.ui = new KanbanUI(this);
     this.scene = null;
-    this.view = '3d';
+    this.view = '2d';
 
     this._bootSequence(() => this._initScene());
   }
@@ -48,16 +48,6 @@ class App {
       this.scene.buildAgentPanels(AGENTS);
       this.scene.buildAgentLabels(AGENTS);
 
-      // Cinematic intro sweep
-      this.scene.orbitState.radius = 70;
-      this.scene.orbitState.phi = 0.08;
-      this.scene.orbitState.theta = Math.PI * 0.6;
-      setTimeout(() => {
-        this.scene.orbitState.targetRadius = 28;
-        this.scene.orbitState.targetPhi = 0.3;
-        this.scene.orbitState.targetTheta = 0;
-      }, 300);
-
     } catch (err) {
       console.warn('3D scene init failed, falling back to 2D:', err);
       this.scene = this._makeNoopScene();
@@ -65,6 +55,9 @@ class App {
       const hint = document.getElementById('controls-hint');
       if (hint) hint.style.display = 'none';
     }
+
+    // Default to 2D view
+    this.setView('2d');
 
     this.taskManager.subscribe((tasks) => this._onTasksUpdate(tasks));
   }
