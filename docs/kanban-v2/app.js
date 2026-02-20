@@ -6,26 +6,14 @@ class App {
   constructor() {
     this.taskManager = new TaskManager();
     this.ui = new KanbanUI(this);
-    this.scene = new KanbanScene(document.getElementById('kanban-canvas'));
-
-    // Bind scene events
-    this.scene.onAgentClick = (agentId) => this._onAgentClick(agentId);
-
-    // Subscribe to task changes
-    this.taskManager.subscribe((tasks) => this._onTasksUpdate(tasks));
-
-    // View mode (3D/2D)
+    this.scene = null;
     this.view = '3d';
 
-    // Build 3D agent panels and labels
-    this.scene.buildAgentPanels(AGENTS);
-    this.scene.buildAgentLabels(AGENTS);
-
-    // Start boot sequence
-    this._bootSequence();
+    // Boot sequence FIRST — then init scene after
+    this._bootSequence(() => this._initScene());
   }
 
-  _bootSequence() {
+  _bootSequence(onComplete) {
     const loader = document.getElementById('boot-loader');
     const loaderText = document.getElementById('loader-text');
     const texts = [
@@ -40,44 +28,84 @@ class App {
     let i = 0;
     const interval = setInterval(() => {
       if (i < texts.length) {
-        loaderText.textContent = texts[i++];
+        if (loaderText) loaderText.textContent = texts[i++];
       } else {
         clearInterval(interval);
-        loader.classList.add('fade-out');
+        if (loader) loader.classList.add('fade-out');
         setTimeout(() => {
-          loader.remove();
-          // Start with cinematic camera sweep
-          this.scene.orbitState.radius = 70;
-          this.scene.orbitState.phi = 0.08;
-          this.scene.orbitState.theta = Math.PI * 0.6;
-          setTimeout(() => {
-            this.scene.orbitState.targetRadius = 28;
-            this.scene.orbitState.targetPhi = 0.3;
-            this.scene.orbitState.targetTheta = 0;
-          }, 300);
+          if (loader) loader.remove();
+          if (onComplete) onComplete();
         }, 600);
       }
     }, 400);
   }
 
-  _onTasksUpdate(tasks) {
-    // Update 3D scene
-    AGENTS.forEach(agent => {
-      const agentTasks = tasks.filter(t => t.agentId === agent.id);
-      this.scene.updateAgentTasks(agent.id, agentTasks);
-      this.scene.updateLabelTaskCount(agent.id, agentTasks.length);
-    });
+  _initScene() {
+    const canvas = document.getElementById('kanban-canvas');
 
-    // Update 2D view
+    // Try to init 3D scene; gracefully fall back to 2D if WebGL fails
+    try {
+      this.scene = new KanbanScene(canvas);
+      this.scene.onAgentClick = (agentId) => this._onAgentClick(agentId);
+      this.scene.buildAgentPanels(AGENTS);
+      this.scene.buildAgentLabels(AGENTS);
+
+      // Cinematic camera sweep
+      this.scene.orbitState.radius = 70;
+      this.scene.orbitState.phi = 0.08;
+      this.scene.orbitState.theta = Math.PI * 0.6;
+      setTimeout(() => {
+        this.scene.orbitState.targetRadius = 28;
+        this.scene.orbitState.targetPhi = 0.3;
+        this.scene.orbitState.targetTheta = 0;
+      }, 300);
+
+    } catch (err) {
+      console.warn('3D scene init failed, falling back to 2D:', err);
+      this.scene = this._makeNoopScene();
+      this.setView('2d');
+      // Hide 3D controls hint
+      const hint = document.getElementById('controls-hint');
+      if (hint) hint.style.display = 'none';
+    }
+
+    // Subscribe to task changes (works in both 2D and 3D)
+    this.taskManager.subscribe((tasks) => this._onTasksUpdate(tasks));
+  }
+
+  // Minimal no-op scene so nothing throws when 3D is unavailable
+  _makeNoopScene() {
+    return {
+      onAgentClick: null,
+      orbitState: { radius: 28, phi: 0.3, theta: 0, targetRadius: 28, targetPhi: 0.3, targetTheta: 0 },
+      buildAgentPanels: () => {},
+      buildAgentLabels: () => {},
+      updateAgentTasks: () => {},
+      updateLabelTaskCount: () => {},
+      updateBurndown: () => {},
+      zoomToAgent: () => {},
+      resetView: () => {},
+      highlightAgent: () => {}
+    };
+  }
+
+  _onTasksUpdate(tasks) {
+    if (this.scene) {
+      AGENTS.forEach(agent => {
+        const agentTasks = tasks.filter(t => t.agentId === agent.id);
+        this.scene.updateAgentTasks(agent.id, agentTasks);
+        this.scene.updateLabelTaskCount(agent.id, agentTasks.length);
+      });
+    }
+
     this.ui.renderFlatView(tasks);
 
-    // Update HUD stats
     const stats = this.taskManager.getStats();
     const costTotals = this.taskManager.getCostTotals();
     this.ui.updateHUD(stats, costTotals);
-    this.scene.updateBurndown(stats);
 
-    // Update agent count
+    if (this.scene) this.scene.updateBurndown(stats);
+
     this.ui.updateAgentCount(AGENTS.length);
   }
 
@@ -85,11 +113,11 @@ class App {
     if (agentId) {
       const agent = AGENTS.find(a => a.id === agentId);
       if (agent) {
-        this.scene.zoomToAgent(agentId);
+        if (this.scene) this.scene.zoomToAgent(agentId);
         this.ui.showAgentSidebar(agent, this.taskManager.getTasksByAgent(agentId));
       }
     } else {
-      this.scene.resetView();
+      if (this.scene) this.scene.resetView();
       this.ui.hideAgentSidebar();
     }
   }
@@ -130,20 +158,20 @@ class App {
     const toggle2d = document.getElementById('toggle-2d');
 
     if (mode === '3d') {
-      scene3d.style.display = 'block';
-      flatView.style.display = 'none';
-      toggle3d.classList.add('active');
-      toggle2d.classList.remove('active');
+      if (scene3d) scene3d.style.display = 'block';
+      if (flatView) flatView.style.display = 'none';
+      if (toggle3d) toggle3d.classList.add('active');
+      if (toggle2d) toggle2d.classList.remove('active');
     } else {
-      scene3d.style.display = 'none';
-      flatView.style.display = 'block';
-      toggle3d.classList.remove('active');
-      toggle2d.classList.add('active');
+      if (scene3d) scene3d.style.display = 'none';
+      if (flatView) { flatView.style.display = 'block'; flatView.classList.remove('hidden'); }
+      if (toggle3d) toggle3d.classList.remove('active');
+      if (toggle2d) toggle2d.classList.add('active');
     }
   }
 
   resetView() {
-    this.scene.resetView();
+    if (this.scene) this.scene.resetView();
     this.ui.hideAgentSidebar();
   }
 
