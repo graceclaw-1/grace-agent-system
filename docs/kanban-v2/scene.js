@@ -226,18 +226,8 @@ class KanbanScene {
     this.centerInnerRing = innerSprite;
     this.scene.add(innerSprite);
 
-    // Pulse ring system
+    // Pulse rings removed — were causing visible expanding square artifacts
     this.pulseRings = [];
-    for (let i = 0; i < 3; i++) {
-      const pGeo = new THREE.RingGeometry(1, 1.05, 32);
-      const pMat = new THREE.MeshBasicMaterial({ color: 0x00fff0, transparent: true, opacity: 0.0, side: THREE.DoubleSide });
-      const pRing = new THREE.Mesh(pGeo, pMat);
-      pRing.rotation.x = -Math.PI / 2;
-      pRing.position.y = -2.98;
-      pRing.userData.phase = i / 3; // stagger phases
-      this.pulseRings.push(pRing);
-      this.scene.add(pRing);
-    }
 
     // Vertical beam removed — caused a rectangular artifact on mobile
   }
@@ -550,7 +540,7 @@ class KanbanScene {
 
     // Task title (truncate)
     ctx.fillStyle = '#e0e0ff';
-    ctx.font = 'bold 11px monospace';
+    ctx.font = 'bold 14px monospace';
     const maxW = pixW - 16;
     let title = task.title;
     while (ctx.measureText(title).width > maxW && title.length > 3) {
@@ -561,7 +551,7 @@ class KanbanScene {
 
     // Priority badge
     ctx.fillStyle = priColor;
-    ctx.font = '8px monospace';
+    ctx.font = '10px monospace';
     ctx.fillText(task.priority.toUpperCase(), 8, pixH - 10);
 
     // Scanline effect
@@ -718,7 +708,7 @@ class KanbanScene {
       const nameEl = document.createElement('div');
       nameEl.style.cssText = `
         font-family: 'Orbitron', monospace;
-        font-size: 9px;
+        font-size: 11px;
         font-weight: 700;
         letter-spacing: 0.18em;
         color: ${agent.color};
@@ -734,7 +724,7 @@ class KanbanScene {
         gap: 5px;
       `;
       nameEl.innerHTML = `${agent.emoji} ${agent.name.toUpperCase()} <span class="label-task-count" style="
-        font-size: 8px;
+        font-size: 10px;
         background: ${agent.color}25;
         border: 1px solid ${agent.color}80;
         border-radius: 2px;
@@ -748,7 +738,7 @@ class KanbanScene {
       const roleEl = document.createElement('div');
       roleEl.style.cssText = `
         font-family: 'Share Tech Mono', monospace;
-        font-size: 7px;
+        font-size: 9px;
         color: rgba(200,200,255,0.5);
         letter-spacing: 0.1em;
         white-space: nowrap;
@@ -817,35 +807,31 @@ class KanbanScene {
 
     // aurora removed
 
-    // Animate grid scroll
-    if (this.gridGroup) {
-      this.gridGroup.position.z = (elapsed * 1.5) % 2;
-    }
+    // Grid scroll — removed (was distracting)
 
-    // Animate connection lines
-    this.agentPanels.forEach((pd, i) => {
+    // Connection lines — static opacity, no flicker
+    this.agentPanels.forEach((pd) => {
       if (pd.connectionLine) {
-        pd.connectionLine.material.opacity = 0.08 + 0.08 * Math.sin(elapsed * 1.5 + i * 0.7);
+        pd.connectionLine.material.opacity = 0.1;
       }
     });
 
-    // Animate agent panels
+    // Agent panels — minimal animation only
     this.agentPanels.forEach((pd, i) => {
-      // Gentle float
-      pd.group.position.y = pd.baseY + Math.sin(elapsed * 0.7 + i * 0.8) * 0.15;
+      // No floating — panels stay still
+      pd.group.position.y = pd.baseY;
 
-      // Animate panel shader
-      pd.panelMat.uniforms.time.value = elapsed;
+      // Panel shader time (drives subtle scanline only, not rapid flash)
+      pd.panelMat.uniforms.time.value = elapsed * 0.2; // slowed 5x
 
-      // Rotate avatar sphere
-      pd.avatar.rotation.y = elapsed * 0.8 + i;
-      pd.ring.rotation.z = elapsed * 0.4 + i;
+      // Slow avatar rotation
+      pd.avatar.rotation.y = elapsed * 0.2 + i;
+      pd.ring.rotation.z = elapsed * 0.1 + i;
 
-      // Pulse status dot
-      const pulse = 0.5 + 0.5 * Math.sin(elapsed * 3 + i);
-      pd.statusDot.material.emissiveIntensity = 2 + pulse * 3;
+      // Status dot — static glow, no pulse
+      pd.statusDot.material.emissiveIntensity = 2.5;
 
-      // Hover detection
+      // Hover detection for cursor
       this.raycaster.setFromCamera(this.mouse, this.camera);
       const hits = this.raycaster.intersectObject(pd.panel);
       if (hits.length > 0) {
@@ -856,33 +842,17 @@ class KanbanScene {
       }
     });
 
-    // Animate dynamic lights
-    if (this.dynamicLights) {
-      this.dynamicLights[0].position.x = Math.sin(elapsed * 0.4) * 20;
-      this.dynamicLights[0].position.z = Math.cos(elapsed * 0.4) * 20;
-      this.dynamicLights[1].position.x = Math.cos(elapsed * 0.3) * 20;
-      this.dynamicLights[1].position.z = Math.sin(elapsed * 0.3) * 20;
-    }
+    // Dynamic lights — static positions, no swirl
+    // (removed movement — was causing rapid light-flicker on panels)
 
-    // Check if any panel hovered for cursor
+    // Cursor reset
     const anyHovered = this.agentPanels.some(pd => pd.panelMat.uniforms.hovered.value > 0);
     if (!anyHovered) document.body.style.cursor = 'default';
 
-    // Animate pulse rings
-    if (this.pulseRings) {
-      this.pulseRings.forEach(ring => {
-        const phase = ring.userData.phase;
-        const t = ((elapsed * 0.5 + phase) % 1.0);
-        const maxR = 14;
-        const r = t * maxR;
-        ring.scale.set(r, r, r);
-        ring.material.opacity = (1 - t) * 0.25;
-      });
-    }
-
-    // Pulse center inner glow sprite
+    // Pulse rings — removed (was a visible expanding square ring)
+    // Center glow — static
     if (this.centerInnerRing && this.centerInnerRing.material) {
-      this.centerInnerRing.material.opacity = 0.5 + 0.3 * Math.sin(elapsed * 1.5);
+      this.centerInnerRing.material.opacity = 0.6;
     }
 
     // Update HTML labels
