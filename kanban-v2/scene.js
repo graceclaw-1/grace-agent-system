@@ -192,12 +192,12 @@ class KanbanScene {
       gridGroup.add(new THREE.Line(geo, vMat));
     }
 
-    // Floor plane
+    // Floor plane — very dark, nearly invisible
     const floorGeo = new THREE.PlaneGeometry(120, 80);
     const floorMat = new THREE.MeshBasicMaterial({
-      color: 0x000011,
+      color: 0x000008,
       transparent: true,
-      opacity: 0.7,
+      opacity: 0.85,
       side: THREE.DoubleSide
     });
     const floor = new THREE.Mesh(floorGeo, floorMat);
@@ -210,13 +210,13 @@ class KanbanScene {
   }
 
   _buildSunHorizon() {
-    // Synthwave sun semi-circle on the horizon
-    const sunGroup = new THREE.Group();
-    sunGroup.position.set(0, 2, -45);
+    // Soft aurora / nebula glow on the horizon — replaces the harsh striped sun
+    const auroraGroup = new THREE.Group();
+    auroraGroup.position.set(0, 0, -48);
 
-    // Sun disk
-    const sunGeo = new THREE.CircleGeometry(8, 32, 0, Math.PI);
-    const sunMat = new THREE.ShaderMaterial({
+    // Large soft glow plane — deep purple-cyan aurora
+    const auroraGeo = new THREE.PlaneGeometry(80, 24);
+    const auroraMat = new THREE.ShaderMaterial({
       uniforms: { time: { value: 0 } },
       vertexShader: `
         varying vec2 vUv;
@@ -224,31 +224,67 @@ class KanbanScene {
       `,
       fragmentShader: `
         varying vec2 vUv;
+        uniform float time;
         void main() {
-          float y = vUv.y;
-          vec3 top = vec3(1.0, 0.85, 0.0);
-          vec3 bot = vec3(1.0, 0.05, 0.4);
-          vec3 col = mix(bot, top, y);
-          // Scanlines on sun
-          float lines = step(0.5, fract(vUv.y * 8.0));
-          col = mix(col * 0.3, col, lines);
-          gl_FragColor = vec4(col, 0.95);
+          // Fade out at edges and top
+          float xFade = 1.0 - pow(abs(vUv.x - 0.5) * 2.0, 2.0);
+          float yFade = smoothstep(1.0, 0.0, vUv.y) * smoothstep(0.0, 0.15, vUv.y);
+
+          // Slow aurora wave
+          float wave = sin(vUv.x * 6.0 + time * 0.3) * 0.5 + 0.5;
+          float wave2 = sin(vUv.x * 3.0 - time * 0.2 + 1.5) * 0.5 + 0.5;
+
+          // Color: cyan to purple aurora
+          vec3 col1 = vec3(0.0, 1.0, 0.94);   // cyan
+          vec3 col2 = vec3(0.5, 0.1, 1.0);     // purple
+          vec3 col3 = vec3(1.0, 0.0, 0.67);    // hot pink
+
+          vec3 color = mix(col1, col2, wave);
+          color = mix(color, col3, wave2 * 0.3);
+
+          float alpha = xFade * yFade * 0.18;
+          gl_FragColor = vec4(color, alpha);
         }
       `,
-      side: THREE.DoubleSide
+      transparent: true,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
     });
-    const sun = new THREE.Mesh(sunGeo, sunMat);
-    sun.rotation.x = Math.PI;
-    sunGroup.add(sun);
+    const aurora = new THREE.Mesh(auroraGeo, auroraMat);
+    aurora.position.y = 6;
+    auroraGroup.add(aurora);
 
-    // Glow ring around sun
-    const glowGeo = new THREE.RingGeometry(7.8, 9.2, 32, 1, 0, Math.PI);
-    const glowMat = new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
-    const glow = new THREE.Mesh(glowGeo, glowMat);
-    glow.rotation.x = Math.PI;
-    sunGroup.add(glow);
+    // Second softer layer
+    const aurora2Geo = new THREE.PlaneGeometry(60, 12);
+    const aurora2Mat = new THREE.ShaderMaterial({
+      uniforms: { time: { value: 0 } },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+      `,
+      fragmentShader: `
+        varying vec2 vUv;
+        uniform float time;
+        void main() {
+          float xFade = 1.0 - pow(abs(vUv.x - 0.5) * 2.0, 1.5);
+          float yFade = smoothstep(1.0, 0.2, vUv.y) * smoothstep(0.0, 0.3, vUv.y);
+          float wave = sin(vUv.x * 4.0 - time * 0.15 + 0.8) * 0.5 + 0.5;
+          vec3 color = mix(vec3(0.0, 0.8, 1.0), vec3(0.6, 0.0, 1.0), wave);
+          gl_FragColor = vec4(color, xFade * yFade * 0.12);
+        }
+      `,
+      transparent: true,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const aurora2 = new THREE.Mesh(aurora2Geo, aurora2Mat);
+    aurora2.position.y = 3;
+    auroraGroup.add(aurora2);
 
-    this.scene.add(sunGroup);
+    this.auroraUniforms = [auroraMat.uniforms, aurora2Mat.uniforms];
+    this.scene.add(auroraGroup);
   }
 
   _buildCenterPlatform() {
@@ -861,6 +897,11 @@ class KanbanScene {
     // Animate particle system
     if (this.particles) {
       this.particles.material.uniforms.time.value = elapsed;
+    }
+
+    // Animate aurora
+    if (this.auroraUniforms) {
+      this.auroraUniforms.forEach(u => { u.time.value = elapsed; });
     }
 
     // Animate grid scroll
