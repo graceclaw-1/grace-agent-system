@@ -131,11 +131,7 @@ class KanbanScene {
     const o = this.orbitState;
     const lerp = (a, b, t) => a + (b - a) * t;
 
-    // Auto-rotate when idle for 5+ seconds and not zoomed in on agent
-    const idleMs = Date.now() - (o.lastInteraction || 0);
-    if (idleMs > 5000 && !this.selectedAgent && !o.isDown) {
-      o.targetTheta += 0.003;
-    }
+    // Auto-rotation disabled — was causing unwanted clockwise spin
 
     o.theta = lerp(o.theta, o.targetTheta, 0.08);
     o.phi = lerp(o.phi, o.targetPhi, 0.08);
@@ -200,13 +196,7 @@ class KanbanScene {
   // _buildSunHorizon removed — was causing visible square/rectangle artifacts
 
   _buildCenterPlatform() {
-    // Glowing circle at center
-    const ringGeo = new THREE.RingGeometry(12.5, 13, 64);
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0x00fff0, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = -2.99;
-    this.scene.add(ring);
+    // Outer ring removed — was appearing as a pulse ring artifact
 
     // Inner ring — use a small sprite glow instead of RingGeometry (avoids rectangle artifact)
     const innerCanvas = document.createElement('canvas');
@@ -470,13 +460,8 @@ class KanbanScene {
       avatar.position.set(0, panelH / 2 + 0.6, 0);
       group.add(avatar);
 
-      // Orbit ring around avatar
-      const ringGeo = new THREE.RingGeometry(0.5, 0.55, 32);
-      const ringMat = new THREE.MeshBasicMaterial({ color: agentColor, transparent: true, opacity: 0.7, side: THREE.DoubleSide });
-      const ring = new THREE.Mesh(ringGeo, ringMat);
-      ring.position.copy(avatar.position);
-      ring.rotation.x = Math.PI / 4;
-      group.add(ring);
+      // Avatar orbit ring removed — appeared as spinning ring
+      const ring = null; // kept as null ref for compatibility
 
       // --- Status indicator ---
       const statusColors = { online: 0x00fff0, busy: 0xff00aa, idle: 0x818cf8 };
@@ -540,7 +525,7 @@ class KanbanScene {
 
     // Task title (truncate)
     ctx.fillStyle = '#e0e0ff';
-    ctx.font = 'bold 14px monospace';
+    ctx.font = 'bold 18px monospace';
     const maxW = pixW - 16;
     let title = task.title;
     while (ctx.measureText(title).width > maxW && title.length > 3) {
@@ -551,7 +536,7 @@ class KanbanScene {
 
     // Priority badge
     ctx.fillStyle = priColor;
-    ctx.font = '10px monospace';
+    ctx.font = '12px monospace';
     ctx.fillText(task.priority.toUpperCase(), 8, pixH - 10);
 
     // Scanline effect
@@ -708,7 +693,7 @@ class KanbanScene {
       const nameEl = document.createElement('div');
       nameEl.style.cssText = `
         font-family: 'Orbitron', monospace;
-        font-size: 11px;
+        font-size: 18px;
         font-weight: 700;
         letter-spacing: 0.18em;
         color: ${agent.color};
@@ -724,7 +709,7 @@ class KanbanScene {
         gap: 5px;
       `;
       nameEl.innerHTML = `${agent.emoji} ${agent.name.toUpperCase()} <span class="label-task-count" style="
-        font-size: 10px;
+        font-size: 15px;
         background: ${agent.color}25;
         border: 1px solid ${agent.color}80;
         border-radius: 2px;
@@ -738,7 +723,7 @@ class KanbanScene {
       const roleEl = document.createElement('div');
       roleEl.style.cssText = `
         font-family: 'Share Tech Mono', monospace;
-        font-size: 9px;
+        font-size: 14px;
         color: rgba(200,200,255,0.5);
         letter-spacing: 0.1em;
         white-space: nowrap;
@@ -826,7 +811,7 @@ class KanbanScene {
 
       // Slow avatar rotation
       pd.avatar.rotation.y = elapsed * 0.2 + i;
-      pd.ring.rotation.z = elapsed * 0.1 + i;
+      if (pd.ring) pd.ring.rotation.z = elapsed * 0.1 + i;
 
       // Status dot — static glow, no pulse
       pd.statusDot.material.emissiveIntensity = 2.5;
