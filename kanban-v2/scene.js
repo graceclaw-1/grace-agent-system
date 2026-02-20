@@ -55,7 +55,6 @@ class KanbanScene {
     this._buildCenterPlatform();
     this._buildParticleSystem();
     this._buildStarfield();
-    this._buildSunHorizon();
 
     // --- Events ---
     window.addEventListener('resize', () => this._onResize());
@@ -198,45 +197,7 @@ class KanbanScene {
     this.scene.add(gridGroup);
   }
 
-  _buildSunHorizon() {
-    // Soft glow sprites on the horizon — Sprites always face the camera so
-    // they never appear as visible flat rectangles
-    this.auroraSprites = [];
-    this.auroraUniforms = [];
-
-    const glowDefs = [
-      { pos: [0, 4, -48],  size: 60, colors: ['#00fff0', '#7700ff'], alpha: 0.18 },
-      { pos: [-20, 2, -44], size: 35, colors: ['#ff00aa', '#7700ff'], alpha: 0.12 },
-      { pos: [20, 2, -44],  size: 35, colors: ['#00fff0', '#ff00aa'], alpha: 0.12 },
-    ];
-
-    glowDefs.forEach(def => {
-      const canvas = document.createElement('canvas');
-      canvas.width = 256; canvas.height = 256;
-      const ctx = canvas.getContext('2d');
-      // Radial gradient — soft blob, no hard edges, no visible rectangle
-      const grad = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
-      grad.addColorStop(0,   def.colors[0] + 'AA');
-      grad.addColorStop(0.4, def.colors[1] + '55');
-      grad.addColorStop(1,   'transparent');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, 256, 256);
-
-      const tex = new THREE.CanvasTexture(canvas);
-      const mat = new THREE.SpriteMaterial({
-        map: tex,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        opacity: def.alpha
-      });
-      const sprite = new THREE.Sprite(mat);
-      sprite.position.set(...def.pos);
-      sprite.scale.set(def.size, def.size, 1);
-      this.scene.add(sprite);
-      this.auroraSprites.push({ sprite, mat, baseOpacity: def.alpha });
-    });
-  }
+  // _buildSunHorizon removed — was causing visible square/rectangle artifacts
 
   _buildCenterPlatform() {
     // Glowing circle at center
@@ -854,12 +815,7 @@ class KanbanScene {
       this.particles.material.uniforms.time.value = elapsed;
     }
 
-    // Gently pulse aurora sprites
-    if (this.auroraSprites) {
-      this.auroraSprites.forEach((s, i) => {
-        s.mat.opacity = s.baseOpacity * (0.8 + 0.2 * Math.sin(elapsed * 0.4 + i * 1.3));
-      });
-    }
+    // aurora removed
 
     // Animate grid scroll
     if (this.gridGroup) {
