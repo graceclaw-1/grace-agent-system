@@ -17,6 +17,10 @@ class App {
     // View mode (3D/2D)
     this.view = '3d';
 
+    // Build 3D agent panels and labels
+    this.scene.buildAgentPanels(AGENTS);
+    this.scene.buildAgentLabels(AGENTS);
+
     // Start boot sequence
     this._bootSequence();
   }

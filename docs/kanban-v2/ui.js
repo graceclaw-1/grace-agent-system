@@ -64,7 +64,7 @@ class KanbanUI {
 
   openModal(taskId = null, defaults = {}) {
     this.editingTaskId = taskId;
-    const task = taskId ? this.app.tasks.find(t => t.id === taskId) : null;
+    const task = taskId ? this.app.taskManager.tasks.find(t => t.id === taskId) : null;
 
     this.modalTitle.textContent = task ? '◈ EDIT TASK' : '◈ NEW TASK';
 
@@ -273,7 +273,183 @@ class KanbanUI {
     `;
   }
 
-  // ... [Rest of the class remains similar, with model badges added to agent sidebar] ...
+  _setupDragDrop(container) {
+    let draggedTask = null;
+
+    container.querySelectorAll('.flat-card').forEach(card => {
+      card.addEventListener('dragstart', (e) => {
+        draggedTask = {
+          id: card.dataset.task,
+          agentId: card.dataset.agent,
+          column: card.dataset.col
+        };
+        card.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        container.querySelectorAll('.flat-col-tasks').forEach(el => el.classList.remove('drop-target'));
+      });
+    });
+
+    container.querySelectorAll('.flat-col-tasks').forEach(colEl => {
+      colEl.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        colEl.classList.add('drop-target');
+      });
+      colEl.addEventListener('dragleave', () => colEl.classList.remove('drop-target'));
+      colEl.addEventListener('drop', (e) => {
+        e.preventDefault();
+        colEl.classList.remove('drop-target');
+        if (!draggedTask) return;
+
+        // Parse new column and agent from element id: flat-col-{agentId}-{colId}
+        const id = colEl.id; // e.g. flat-col-grace-backlog
+        const parts = id.replace('flat-col-', '').split('-');
+        const newCol = parts[parts.length - 1];
+        const newAgent = parts.slice(0, -1).join('-');
+
+        this.app.moveTask(draggedTask.id, newCol, newAgent);
+        draggedTask = null;
+      });
+    });
+  }
+
+  // ---- Event Listeners ----
+  _setupEventListeners() {
+    // View toggle
+    const toggle3D = document.getElementById('toggle-3d');
+    const toggle2D = document.getElementById('toggle-2d');
+    if (toggle3D) toggle3D.addEventListener('click', () => this.app.setView('3d'));
+    if (toggle2D) toggle2D.addEventListener('click', () => this.app.setView('2d'));
+
+    // Add task button
+    const addBtn = document.getElementById('add-task-btn');
+    if (addBtn) addBtn.addEventListener('click', () => this.openModal());
+
+    // Reset view
+    const resetBtn = document.getElementById('reset-view-btn');
+    if (resetBtn) resetBtn.addEventListener('click', () => this.app.resetView());
+
+    // Reset data
+    const resetDataBtn = document.getElementById('reset-data-btn');
+    if (resetDataBtn) resetDataBtn.addEventListener('click', () => {
+      if (confirm('Reset all tasks to default seed data?')) {
+        this.app.resetData();
+      }
+    });
+  }
+
+  // ---- Agent Panel Sidebar ----
+  showAgentSidebar(agent, tasks) {
+    const sidebar = document.getElementById('agent-sidebar');
+    if (!sidebar) return;
+
+    const agentTasks = tasks.filter(t => t.agentId === agent.id);
+    const stats = { backlog: 0, inprogress: 0, review: 0, done: 0 };
+    agentTasks.forEach(t => { if (stats[t.column] !== undefined) stats[t.column]++; });
+
+    sidebar.innerHTML = `
+      <div class="sidebar-header" style="border-top-color: ${agent.color}">
+        <span class="sidebar-emoji">${agent.emoji}</span>
+        <div>
+          <div class="sidebar-name" style="color: ${agent.color}">${agent.name}</div>
+          <div class="sidebar-role">
+            ${agent.role}
+            <span style="font-size:9px; color:${agent.color}80; border:1px solid ${agent.color}40; padding:1px 4px; margin-left:6px; border-radius:2px;">[${agent.model}]</span>
+          </div>
+        </div>
+        <div class="sidebar-status">
+          <span class="status-dot-sidebar status-${agent.status}"></span>
+          ${agent.status.toUpperCase()}
+        </div>
+        <button id="sidebar-close" class="cyber-btn-sm">✕</button>
+      </div>
+      <div class="sidebar-stats">
+        ${COLUMNS.map(c => `
+          <div class="sidebar-stat">
+            <div class="sidebar-stat-num" style="color: ${agent.color}">${stats[c.id] || 0}</div>
+            <div class="sidebar-stat-label">${c.label}</div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="sidebar-desc">${agent.description}</div>
+      <div class="sidebar-tasks">
+        ${COLUMNS.map(col => {
+          const colTasks = agentTasks.filter(t => t.column === col.id);
+          if (colTasks.length === 0) return '';
+          return `
+            <div class="sidebar-col-section">
+              <div class="sidebar-col-title" style="color: ${agent.color}">${col.icon} ${col.label}</div>
+              ${colTasks.map(t => {
+                const pri = PRIORITIES[t.priority] || PRIORITIES.medium;
+                return `
+                  <div class="sidebar-task-item" data-task="${t.id}">
+                    <div class="sidebar-task-pri-dot" style="background: ${pri.color}"></div>
+                    <div class="sidebar-task-body">
+                      <div class="sidebar-task-title">${this._escapeHtml(t.title)}</div>
+                      ${t.description ? `<div class="sidebar-task-desc">${this._escapeHtml(t.description.substring(0, 60))}…</div>` : ''}
+                      ${(t.timeSpent > 0 || t.modelCost > 0) ? `<div class="sidebar-task-desc" style="margin-top:3px">
+                        ${t.timeSpent > 0 ? `⏱ ${t.timeSpent}h/${t.timeEstimated}h` : ''}
+                        ${t.modelCost > 0 ? `💰 $${t.modelCost.toFixed(2)}` : ''}
+                      </div>` : ''}
+                    </div>
+                    <div class="sidebar-task-actions">
+                      <button class="sidebar-edit-btn" data-task="${t.id}" title="Edit">✎</button>
+                      <button class="sidebar-del-btn" data-task="${t.id}" title="Delete">✕</button>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `;
+        }).join('')}
+      </div>
+      <button class="cyber-btn sidebar-add-btn" data-agent="${agent.id}">+ ADD TASK</button>
+    `;
+
+    sidebar.classList.add('active');
+
+    document.getElementById('sidebar-close') &&
+      document.getElementById('sidebar-close').addEventListener('click', () => {
+        this.hideAgentSidebar();
+        this.app.resetView();
+      });
+
+    sidebar.querySelector('.sidebar-add-btn') &&
+      sidebar.querySelector('.sidebar-add-btn').addEventListener('click', () => {
+        this.openModal(null, { agentId: agent.id });
+      });
+
+    sidebar.querySelectorAll('.sidebar-edit-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => { e.stopPropagation(); this.openModal(btn.dataset.task); });
+    });
+    sidebar.querySelectorAll('.sidebar-del-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (confirm('Delete this task?')) this.app.deleteTaskById(btn.dataset.task);
+      });
+    });
+  }
+
+  hideAgentSidebar() {
+    const sidebar = document.getElementById('agent-sidebar');
+    if (sidebar) sidebar.classList.remove('active');
+  }
+
+  // ---- Toast ----
+  showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('visible'));
+    setTimeout(() => {
+      toast.classList.remove('visible');
+      setTimeout(() => toast.remove(), 400);
+    }, 2500);
+  }
 
   _escapeHtml(str) {
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
