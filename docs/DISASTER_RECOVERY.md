@@ -2,21 +2,28 @@
 
 > **Last updated:** 2026-02-21  
 > **Backup location:** `s3://grace-server-backups-graceclaw` (us-east-1)  
-> **Restic password:** `Grace-77407`  
-> **AWS credentials:** stored in `graceclaw-1/polymarket-scanner-web` → GitHub repo secrets
+> **Restic password:** stored privately — ask Asif or retrieve from `~/.restic.env` on the server  
+> **AWS credentials:** stored in `graceclaw-1/polymarket-scanner-web` → GitHub repo secrets  
+> **Restore script:** [`scripts/restore-grace.sh`](../scripts/restore-grace.sh)
 
 ---
 
 ## ⚡ TL;DR — Full Restore in One Command
 
-If you have a fresh EC2 instance and AWS credentials, run this from your laptop:
+If you have a fresh EC2 instance, AWS credentials, and the restic password:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/graceclaw-1/grace-agent-system/main/scripts/restore-grace.sh | \
-  AWS_ACCESS_KEY_ID=<key> AWS_SECRET_ACCESS_KEY=<secret> bash
+curl -fsSL https://raw.githubusercontent.com/graceclaw-1/grace-agent-system/main/scripts/restore-grace.sh \
+  -o /tmp/restore-grace.sh
+
+export AWS_ACCESS_KEY_ID="<from GitHub secrets>"
+export AWS_SECRET_ACCESS_KEY="<from GitHub secrets>"
+export RESTIC_PASSWORD="<ask Asif>"
+
+bash /tmp/restore-grace.sh
 ```
 
-This script handles everything below automatically. The rest of this document explains each step if you need to do it manually or partially.
+This script handles everything below automatically. The rest of this document covers manual steps for partial scenarios.
 
 ---
 
@@ -28,6 +35,8 @@ This script handles everything below automatically. The rest of this document ex
 | OpenClaw crashed / won't start | [§2 Restart Services](#2-restart-services) |
 | Data corruption / accidental deletion | [§3 Restore from Backup](#3-restore-from-backup) |
 | Full server loss (terminated/corrupted) | [§4 Full Rebuild](#4-full-rebuild) |
+| GitHub Actions / backup pipeline broken | [§5 Backup Pipeline Recovery](#5-backup-pipeline-recovery) |
+| AWS account access lost | [§6 AWS Access Recovery](#6-aws-access-recovery) |
 
 ---
 
@@ -36,12 +45,15 @@ This script handles everything below automatically. The rest of this document ex
 **If SSH is locked out or key is lost:**
 
 1. Go to [AWS EC2 Console](https://console.aws.amazon.com/ec2)
-2. Select the Grace instance → **Actions → Connect → EC2 Instance Connect** (browser SSH — no key needed)
+2. Select the Grace instance → **Actions → Connect → EC2 Instance Connect** (browser SSH — no key needed, no AWS CLI required)
 3. From there, add your new SSH public key:
    ```bash
    echo "ssh-ed25519 YOUR_NEW_PUBLIC_KEY" >> ~/.ssh/authorized_keys
+   chmod 600 ~/.ssh/authorized_keys
    ```
 4. Reconnect via normal SSH: `ssh -i your_key.pem ec2-user@3.88.86.229`
+
+> ⚠️ **If EC2 Instance Connect is also unavailable** (e.g. network ACL or SG blocks port 22): use AWS Systems Manager Session Manager — it connects via the SSM agent over HTTPS, bypassing SSH entirely. The instance has the SSM agent installed and an IAM role with SSM permissions.
 
 ---
 
@@ -54,7 +66,7 @@ This script handles everything below automatically. The rest of this document ex
 systemctl --user restart openclaw-gateway
 systemctl --user status openclaw-gateway
 
-# 2. Nginx
+# 2. Nginx (must be up before Grafana/external access works)
 sudo systemctl restart nginx
 sudo systemctl status nginx
 
@@ -62,19 +74,15 @@ sudo systemctl status nginx
 sudo systemctl restart prometheus grafana-server loki promtail
 sudo systemctl status prometheus grafana-server
 
-# 4. Grace Agent Relay
-# The relay auto-restarts via its systemd user service
-# If it's not running:
+# 4. Grace Agent Relay (if not auto-restarted)
 systemctl --user list-units | grep relay
-cd ~/.openclaw/workspace/agents/relay && node index.js &
+# If not running, it should be under user systemd — check:
+ls ~/.config/systemd/user/
 ```
 
-**Check everything is up:**
+**Verify everything is up:**
 ```bash
-curl -s http://localhost:18789/health  # OpenClaw gateway
-curl -s http://localhost/grafana/api/health  # Grafana via nginx
-systemctl --user is-active openclaw-gateway && echo "OpenClaw: OK"
-sudo systemctl is-active nginx && echo "Nginx: OK"
+bash <(curl -fsSL https://raw.githubusercontent.com/graceclaw-1/grace-agent-system/main/scripts/health-check-grace.sh)
 ```
 
 ---
@@ -84,35 +92,39 @@ sudo systemctl is-active nginx && echo "Nginx: OK"
 **You have the server, but files are missing or corrupted.**
 
 ```bash
-# Load credentials (already configured on this server)
+# Load credentials (should already exist on the server)
 source ~/.restic.env
 
-# List available snapshots
+# List available snapshots (most recent first)
 restic snapshots
 
-# Restore specific path (example: restore just .openclaw config)
+# Restore a specific path only (surgical restore)
 restic restore latest --target / --include /home/ec2-user/.openclaw
+restic restore latest --target / --include /etc/nginx
 
-# Restore everything (full data restore to original paths)
+# Full restore — overwrites everything with latest snapshot
 restic restore latest --target /
 
-# After restore, restart services
+# After any restore, restart services
 systemctl --user restart openclaw-gateway
 sudo systemctl restart nginx prometheus grafana-server loki promtail
 ```
 
-**If `.restic.env` is missing** (credentials lost):
+**If `~/.restic.env` is missing** (credentials file lost):
 ```bash
+# Reconstruct it — get values from GitHub secrets and Asif
 cat > ~/.restic.env << 'EOF'
-export AWS_ACCESS_KEY_ID=YOUR_KEY_HERE
-export AWS_SECRET_ACCESS_KEY=YOUR_SECRET_HERE
+export AWS_ACCESS_KEY_ID=REPLACE_WITH_VALUE_FROM_GITHUB_SECRETS
+export AWS_SECRET_ACCESS_KEY=REPLACE_WITH_VALUE_FROM_GITHUB_SECRETS
 export RESTIC_REPOSITORY="s3:s3.amazonaws.com/grace-server-backups-graceclaw/restic"
-export RESTIC_PASSWORD="Grace-77407"
+export RESTIC_PASSWORD="REPLACE_WITH_RESTIC_PASSWORD_FROM_ASIF"
 EOF
 chmod 600 ~/.restic.env
 source ~/.restic.env
+restic snapshots  # Verify connectivity
 ```
-*(Get AWS keys from: GitHub → graceclaw-1/polymarket-scanner-web → Settings → Secrets)*
+
+> 📍 AWS keys: GitHub → `graceclaw-1/polymarket-scanner-web` → Settings → Secrets
 
 ---
 
@@ -122,61 +134,119 @@ source ~/.restic.env
 
 ### Step 1 — Launch a new EC2 instance
 
-- **AMI:** Amazon Linux 2023 (arm64)
-- **Instance type:** `c7g.xlarge` (Graviton3)
-- **Region:** `us-east-1`
-- **Storage:** 64 GB gp3
-- **Security group:** Open ports 22, 80, 443, 18789, 3000, 9090
-- **Key pair:** Use your existing key pair or create a new one
+| Setting | Value |
+|---|---|
+| AMI | Amazon Linux 2023 (arm64 / aarch64) |
+| Instance type | `c7g.xlarge` (Graviton3) |
+| Region | `us-east-1` |
+| Availability Zone | `us-east-1d` (to match EBS snapshots if restoring volumes) |
+| Storage | 64 GB gp3 root volume |
+| Security group | Ports: 22, 80, 443, 18789, 3000, 9090 |
+| IAM role | Attach a role with S3 read + SSM access (or use AWS credentials env vars) |
+| Key pair | Use existing key pair or create new one |
 
 ### Step 2 — Bootstrap (run on the new instance)
-
-SSH in, then run the automated restore script:
 
 ```bash
 ssh -i your_key.pem ec2-user@NEW_IP
 
-# Download and run the restore script
+# Download restore script
 curl -fsSL https://raw.githubusercontent.com/graceclaw-1/grace-agent-system/main/scripts/restore-grace.sh \
   -o /tmp/restore-grace.sh
 
-# Set credentials (get from GitHub secrets)
-export AWS_ACCESS_KEY_ID="YOUR_KEY"
-export AWS_SECRET_ACCESS_KEY="YOUR_SECRET"
+# Set credentials
+export AWS_ACCESS_KEY_ID="VALUE_FROM_GITHUB_SECRETS"
+export AWS_SECRET_ACCESS_KEY="VALUE_FROM_GITHUB_SECRETS"
+export RESTIC_PASSWORD="VALUE_FROM_ASIF"
 
 bash /tmp/restore-grace.sh
 ```
 
 The script will:
-- [x] Install Node.js v22, npm
-- [x] Install OpenClaw globally
-- [x] Configure restic + AWS credentials
-- [x] Restore all files from S3 backup (`.openclaw`, nginx config, systemd, `/opt`)
-- [x] Re-register the OpenClaw gateway systemd service
-- [x] Start all services
-- [x] Run a health check
+- [x] Install Node.js 22, restic, AWS CLI
+- [x] Configure AWS credentials and restic env
+- [x] Restore all files from S3 backup (~3.5 GiB)
+- [x] Reinstall OpenClaw and register the systemd gateway service
+- [x] Start all services (nginx, prometheus, grafana, loki, promtail)
+- [x] Run health check
 
-### Step 3 — Update the Elastic IP (if needed)
+**Expected restore time:** ~5–10 minutes
+
+### Step 3 — Update IP references (if Elastic IP was lost)
 
 If you lost the old Elastic IP (`3.88.86.229`):
-1. Allocate a new EIP in AWS console
-2. Associate it with the new instance
-3. Update `GRACE_SERVER_IP` in GitHub secrets:
+1. Allocate a new EIP in AWS console → Associate with new instance
+2. Update GitHub secrets with new IP:
    ```bash
    gh secret set GRACE_SERVER_IP --body "NEW_IP" -R graceclaw-1/polymarket-scanner-web
    ```
+3. Update nginx config if it references the old IP:
+   ```bash
+   sudo grep -r "3.88.86.229" /etc/nginx/ && sudo nginx -t && sudo systemctl reload nginx
+   ```
 
-### Step 4 — Update Slack bot (if IP changed)
+### Step 4 — Verify Slack connectivity
 
-OpenClaw connects to Slack via WebSocket (outbound) — no IP changes needed in Slack. Just confirm the gateway is running and connected:
+OpenClaw connects to Slack via WebSocket (outbound only) — no IP changes needed in Slack config.
+
 ```bash
 openclaw status
-# Should show: connected, agents active
+# Should show: gateway running, agents active, Slack connected
 ```
 
-### Step 5 — Verify Slack connectivity
+Then send a test: `@Grace status check` in any Slack channel.
 
-Send a test message in any Slack channel: `@Grace status check`
+---
+
+## §5 Backup Pipeline Recovery
+
+**Daily GitHub Actions backup stopped running.**
+
+```bash
+# Check last run status
+gh run list -R graceclaw-1/polymarket-scanner-web --workflow=grace-backup.yml --limit 5
+
+# Trigger manual backup immediately
+gh workflow run grace-backup.yml \
+  -R graceclaw-1/polymarket-scanner-web \
+  --field action=backup
+
+# If GitHub Actions is unavailable, run locally on the server:
+source ~/.restic.env
+restic backup \
+  ~/.openclaw ~/.config ~/.npm-global \
+  /etc/nginx /etc/systemd/system /opt \
+  --exclude /etc/nginx/ssl \
+  --exclude /opt/containerd \
+  --tag "manual-$(date +%Y-%m-%d)"
+```
+
+**If the S3 bucket was deleted:**
+1. Recreate it: `aws s3 mb s3://grace-server-backups-graceclaw --region us-east-1`
+2. Re-enable versioning: `aws s3api put-bucket-versioning --bucket grace-server-backups-graceclaw --versioning-configuration Status=Enabled`
+3. Re-initialize restic repo: `source ~/.restic.env && restic init`
+4. Run a fresh full backup
+
+---
+
+## §6 AWS Access Recovery
+
+**AWS credentials compromised or expired.**
+
+1. Log into AWS Console → IAM → Users
+2. Rotate the access key: deactivate old key, create new one
+3. Update GitHub secrets:
+   ```bash
+   gh secret set AWS_ACCESS_KEY_ID --body "NEW_KEY" -R graceclaw-1/polymarket-scanner-web
+   gh secret set AWS_SECRET_ACCESS_KEY --body "NEW_SECRET" -R graceclaw-1/polymarket-scanner-web
+   ```
+4. Update local credentials on the server:
+   ```bash
+   # Update ~/.aws/credentials and ~/.restic.env with new values
+   nano ~/.aws/credentials
+   nano ~/.restic.env
+   ```
+5. Verify: `source ~/.restic.env && restic snapshots`
 
 ---
 
@@ -184,33 +254,33 @@ Send a test message in any Slack channel: `@Grace status check`
 
 | Credential | Where to find it |
 |---|---|
-| AWS Access Key | GitHub → graceclaw-1/polymarket-scanner-web → Secrets: `AWS_ACCESS_KEY_ID` |
-| AWS Secret Key | GitHub → graceclaw-1/polymarket-scanner-web → Secrets: `AWS_SECRET_ACCESS_KEY` |
-| Restic password | `Grace-77407` |
-| OpenClaw gateway token | In `~/.config/systemd/user/openclaw-gateway.service` (or restore from backup) |
-| Slack bot token | In `~/.openclaw/openclaw.json` after restore |
-| SSH deployer key | GitHub → graceclaw-1/polymarket-scanner-web → Secrets: `DEPLOYER_SSH_PRIVATE_KEY` |
+| AWS Access Key ID | GitHub → `graceclaw-1/polymarket-scanner-web` → Secrets: `AWS_ACCESS_KEY_ID` |
+| AWS Secret Key | GitHub → `graceclaw-1/polymarket-scanner-web` → Secrets: `AWS_SECRET_ACCESS_KEY` |
+| Restic password | Ask Asif — stored privately, not in any repo |
+| OpenClaw gateway token | `~/.config/systemd/user/openclaw-gateway.service` (restored from backup) |
+| Slack bot token + app token | `~/.openclaw/openclaw.json` (restored from backup) |
+| SSH deployer key (trading bot) | GitHub → Secrets: `DEPLOYER_SSH_PRIVATE_KEY` |
+| Grace server SSH key | GitHub → Secrets: `GRACE_SERVER_SSH_KEY` |
+
+> ⚠️ **Keep the restic password and AWS credentials somewhere offline** (password manager, printed sheet in a safe location). If both GitHub and the server are inaccessible simultaneously, offline credentials are the only path to recovery.
 
 ---
 
-## 📅 Backup Schedule
+## 📅 Backup Schedule & Coverage
 
-- **Daily at 3 AM UTC** — full restic backup via GitHub Actions
-- **Retention:** 7 daily, 4 weekly, 3 monthly snapshots
-- **What's backed up:** `.openclaw/`, `.config/`, `.npm-global/`, `/etc/nginx/`, `/etc/systemd/system/`, `/opt/`
-- **Not backed up:** `/etc/nginx/ssl/` (SSL keys — regenerate via cert renewal)
+| What | How often | Where |
+|---|---|---|
+| Full config + workspace | Daily 3 AM UTC | `s3://grace-server-backups-graceclaw/restic` |
+| EBS volume snapshot | Daily 2 AM UTC | AWS DLM (Terraform-managed, when applied) |
 
-**Manual backup trigger:**
-```bash
-# Via GitHub Actions (recommended)
-gh workflow run grace-backup.yml -R graceclaw-1/polymarket-scanner-web --field action=backup
+**Retention:** 7 daily, 4 weekly, 3 monthly restic snapshots
 
-# Or locally
-source ~/.restic.env
-restic backup ~/.openclaw ~/.config ~/.npm-global /etc/nginx /etc/systemd/system /opt \
-  --exclude /etc/nginx/ssl --exclude /opt/containerd \
-  --tag manual-$(date +%Y-%m-%d)
-```
+**Backed up:** `.openclaw/`, `.config/`, `.npm-global/`, `/etc/nginx/` (excluding ssl/), `/etc/systemd/system/`, `/opt/`
+
+**Not backed up (requires manual action after restore):**
+- `/etc/nginx/ssl/` — TLS certificates and private keys. Regenerate via `certbot renew` or re-issue from your certificate provider
+- AWS credentials themselves — by design, not stored in backup
+- Restic password — by design, not stored in backup or any repo
 
 ---
 
@@ -231,5 +301,13 @@ Expected output:
 ✅ Loki: active
 ✅ Restic backup: last snapshot within 48h
 ✅ S3 bucket: reachable
-✅ Slack: connected
 ```
+
+---
+
+## 🔒 Security Notes
+
+- The restic backup is **encrypted at rest** (AES-256 via restic) and in transit (HTTPS to S3)
+- The S3 bucket has **public access blocked** and **versioning enabled**
+- This runbook is intentionally stored in a **public repo** — all passwords and keys are excluded. The runbook itself contains no secrets
+- Rotate AWS credentials immediately if you suspect compromise — see §6
